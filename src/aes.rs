@@ -17,7 +17,7 @@ const SBOX_EN: [u8; 256] = [
     0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
 ];
 
-pub fn rot_word(word: u32) -> u32 {
+fn rot_word(word: u32) -> u32 {
     let mut rotated_bytes: [u8; 4] = word.to_be_bytes();
     let temp = rotated_bytes[0];
     rotated_bytes[0] = rotated_bytes[1];
@@ -27,7 +27,7 @@ pub fn rot_word(word: u32) -> u32 {
     u32::from_be_bytes(rotated_bytes)
 }
 
-pub fn sub_word(word: u32) -> u32 {
+fn sub_word(word: u32) -> u32 {
     let bytes = word.to_be_bytes();
     let mut subbed_bytes: [u8; 4] = [0; 4];
     for i in 0..4 {
@@ -38,7 +38,7 @@ pub fn sub_word(word: u32) -> u32 {
     u32::from_be_bytes(subbed_bytes)
 }
 
-pub fn rcon(i: i32) -> [u8; 4] {
+fn rcon(i: i32) -> [u8; 4] {
     let mut rc: u32 = 1;
     for _ in 2..(i + 1) {
         if rc >= 0x80 {
@@ -50,24 +50,51 @@ pub fn rcon(i: i32) -> [u8; 4] {
     return [rc as u8, 0, 0, 0];
 }
 
-pub fn key_expansion(rc1: [u8; 16]) -> [[u8; 16]; 11] {
-    let mut expanded_key: [[u8; 16]; 11] = [[0x00; 16]; 11];
-    expanded_key[0] = rc1;
+pub fn key_expansion(rk0: [u8; 16]) -> [[u8; 16]; 11] {
+    let mut round_keys: [[u8; 16]; 11] = [[0x00; 16]; 11];
+    round_keys[0] = rk0;
     for round in 1..11 {
-        let prev0 = u32::from_be_bytes(expanded_key[round-1][0..4].try_into().unwrap());
-        let prev1 = u32::from_be_bytes(expanded_key[round-1][4..8].try_into().unwrap());
-        let prev2 = u32::from_be_bytes(expanded_key[round-1][8..12].try_into().unwrap());
-        let prev3 = u32::from_be_bytes(expanded_key[round-1][12..16].try_into().unwrap());
+        let prev0 = u32::from_be_bytes(round_keys[round-1][0..4].try_into().unwrap());
+        let prev1 = u32::from_be_bytes(round_keys[round-1][4..8].try_into().unwrap());
+        let prev2 = u32::from_be_bytes(round_keys[round-1][8..12].try_into().unwrap());
+        let prev3 = u32::from_be_bytes(round_keys[round-1][12..16].try_into().unwrap());
+
         let new0 = sub_word(rot_word(prev3)) ^ prev0 ^ u32::from_be_bytes(rcon(round as i32));
-        expanded_key[round][0..4].copy_from_slice(&new0.to_be_bytes());
         let new1 = new0 ^ prev1;
-        expanded_key[round][4..8].copy_from_slice(&new1.to_be_bytes());
         let new2 = new1 ^ prev2;
-        expanded_key[round][8..12].copy_from_slice(&new2.to_be_bytes());
         let new3 = new2 ^ prev3;
-        expanded_key[round][12..16].copy_from_slice(&new3.to_be_bytes());
+
+        round_keys[round][0..4].copy_from_slice(&new0.to_be_bytes());
+        round_keys[round][4..8].copy_from_slice(&new1.to_be_bytes());
+        round_keys[round][8..12].copy_from_slice(&new2.to_be_bytes());
+        round_keys[round][12..16].copy_from_slice(&new3.to_be_bytes());
     }
-    return expanded_key;
+    return round_keys;
+}
+
+pub fn transform(ciphertext: &str) -> [u8; 16] {
+    let mut state: [u8; 16] = [0; 16];
+    for (i, c) in ciphertext[..state.len()].as_bytes().iter().enumerate() {
+        state[i] = *c;
+    }
+    return state;
+}
+
+pub fn print_state(state: [u8; 16]) {
+    for i in 0..4 {
+        for j in 0..4 {
+            print!("{:x} ", state[j*4 + i]);
+        }
+        println!();
+    }
+}
+
+pub fn sub_bytes(state: [u8; 16]) -> [u8; 16] {
+    let mut subbed_state: [u8; 16] = [0; 16];
+    for i in 0..4 {
+        subbed_state[4*i..(4*i+4)].copy_from_slice(&sub_word(u32::from_be_bytes(state[4*i..(4*i+4)].try_into().unwrap())).to_be_bytes());
+    }
+    return subbed_state;
 }
 
 #[cfg(test)]
@@ -117,6 +144,33 @@ mod tests {
             [0xea, 0xd2, 0x73, 0x21, 0xb5, 0x8d, 0xba, 0xd2, 0x31, 0x2b, 0xf5, 0x60, 0x7f, 0x8d, 0x29, 0x2f],
             [0xac, 0x77, 0x66, 0xf3, 0x19, 0xfa, 0xdc, 0x21, 0x28, 0xd1, 0x29, 0x41, 0x57, 0x5c, 0x00, 0x6e],
             [0xd0, 0x14, 0xf9, 0xa8, 0xc9, 0xee, 0x25, 0x89, 0xe1, 0x3f, 0x0c, 0xc8, 0xb6, 0x63, 0x0c, 0xa6],
+        ]);
+    }
+
+    #[test]
+    fn test_transform() {
+        let case1 = "this is one text";
+        let state = transform(case1);
+        print_state(state);
+        assert_eq!(state, [
+            0x74, 0x68, 0x69, 0x73,
+            0x20, 0x69, 0x73, 0x20,
+            0x6f, 0x6e, 0x65, 0x20,
+            0x74, 0x65, 0x78, 0x74
+        ]);
+    }
+
+
+    #[test]
+    fn test_sub_bytes() {
+        let state = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+        let subbed_state = sub_bytes(state);
+        print_state(subbed_state);
+        assert_eq!(subbed_state, [
+            0x63, 0x7c, 0x77, 0x7b,
+            0xf2, 0x6b, 0x6f, 0xc5,
+            0x30, 0x01, 0x67, 0x2b,
+            0xfe, 0xd7, 0xab, 0x76
         ]);
     }
 }
