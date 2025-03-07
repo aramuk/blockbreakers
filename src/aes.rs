@@ -54,10 +54,10 @@ pub fn key_expansion(rk0: [u8; 16]) -> [[u8; 16]; 11] {
     let mut round_keys: [[u8; 16]; 11] = [[0x00; 16]; 11];
     round_keys[0] = rk0;
     for round in 1..11 {
-        let prev0 = u32::from_be_bytes(round_keys[round-1][0..4].try_into().unwrap());
-        let prev1 = u32::from_be_bytes(round_keys[round-1][4..8].try_into().unwrap());
-        let prev2 = u32::from_be_bytes(round_keys[round-1][8..12].try_into().unwrap());
-        let prev3 = u32::from_be_bytes(round_keys[round-1][12..16].try_into().unwrap());
+        let prev0 = u32::from_be_bytes(round_keys[round - 1][0..4].try_into().unwrap());
+        let prev1 = u32::from_be_bytes(round_keys[round - 1][4..8].try_into().unwrap());
+        let prev2 = u32::from_be_bytes(round_keys[round - 1][8..12].try_into().unwrap());
+        let prev3 = u32::from_be_bytes(round_keys[round - 1][12..16].try_into().unwrap());
 
         let new0 = sub_word(rot_word(prev3)) ^ prev0 ^ u32::from_be_bytes(rcon(round as i32));
         let new1 = new0 ^ prev1;
@@ -83,7 +83,7 @@ pub fn transform(ciphertext: &str) -> [u8; 16] {
 pub fn print_state(state: [u8; 16]) {
     for i in 0..4 {
         for j in 0..4 {
-            print!("{:x} ", state[j*4 + i]);
+            print!("{:x} ", state[j * 4 + i]);
         }
         println!();
     }
@@ -92,11 +92,65 @@ pub fn print_state(state: [u8; 16]) {
 pub fn sub_bytes(state: [u8; 16]) -> [u8; 16] {
     let mut subbed_state: [u8; 16] = [0; 16];
     for i in 0..4 {
-        subbed_state[4*i..(4*i+4)].copy_from_slice(&sub_word(u32::from_be_bytes(state[4*i..(4*i+4)].try_into().unwrap())).to_be_bytes());
+        subbed_state[4 * i..(4 * i + 4)].copy_from_slice(
+            &sub_word(u32::from_be_bytes(
+                state[4 * i..(4 * i + 4)].try_into().unwrap(),
+            ))
+            .to_be_bytes(),
+        );
     }
     return subbed_state;
 }
 
+pub fn shift_rows(state: [u8; 16]) -> [u8; 16] {
+    let mut shifted_state: [u8; 16] = [0; 16];
+    for i in 0..4 {
+        shifted_state[i] = state[(i + 4 * i) % 16];
+        shifted_state[i + 4] = state[(i + 4 + 4 * i) % 16];
+        shifted_state[i + 8] = state[(i + 8 + 4 * i) % 16];
+        shifted_state[i + 12] = state[(i + 12 + 4 * i) % 16];
+    }
+    return shifted_state;
+}
+
+// https://en.wikipedia.org/wiki/Rijndael_MixColumns#Implementation_example
+fn dbl(a: u8) -> u8 {
+    return (a << 1) ^ (0x1b * (a >> 7));
+}
+
+fn mul2(a: u8) -> u8 {
+    return dbl(a);
+}
+
+fn mul3(a: u8) -> u8 {
+    return dbl(a) ^ a;
+}
+
+pub fn mix_columns(state: [u8; 16]) -> [u8; 16] {
+    let mut mixed_state: [u8; 16] = [0; 16];
+    for i in 0..4 {
+        let a0 = state[4 * i];
+        let a1 = state[4 * i + 1];
+        let a2 = state[4 * i + 2];
+        let a3 = state[4 * i + 3];
+
+        // print_state(mixed_state);
+        // println!("\n");
+
+        // mixed_state[4 * i] = a0;
+        // mixed_state[4 * i + 1] = a1;
+        // mixed_state[4 * i + 2] = a2;
+        // mixed_state[4 * i + 3] = a3;
+
+        mixed_state[4 * i] = mul2(a0) ^ mul3(a1) ^ a2 ^ a3;
+        mixed_state[4 * i + 1] = a0 ^ mul2(a1) ^ mul3(a2) ^ a3;
+        mixed_state[4 * i + 2] = a0 ^ a1 ^ mul2(a2) ^ mul3(a3);
+        mixed_state[4 * i + 3] = mul3(a0) ^ a1 ^ a2 ^ mul2(a3);
+    }
+    return mixed_state;
+}
+
+#[rustfmt::skip]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,17 +214,56 @@ mod tests {
         ]);
     }
 
-
     #[test]
     fn test_sub_bytes() {
         let state = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
         let subbed_state = sub_bytes(state);
         print_state(subbed_state);
-        assert_eq!(subbed_state, [
+        assert_eq!(
+            subbed_state,
+            [
+                0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7,
+                0xab, 0x76
+            ]
+        );
+    }
+
+    #[test]
+    fn test_shift_rows() {
+        let state = [
             0x63, 0x7c, 0x77, 0x7b,
             0xf2, 0x6b, 0x6f, 0xc5,
             0x30, 0x01, 0x67, 0x2b,
-            0xfe, 0xd7, 0xab, 0x76
+            0xfe, 0xd7, 0xab, 0x76,
+        ];
+        let shifted_state = shift_rows(state);
+        print_state(shifted_state);
+        assert_eq!(shifted_state, [
+            0x63, 0x6b, 0x67, 0x76,
+            0xf2, 0x01, 0xab, 0x7b,
+            0x30, 0xd7, 0x77, 0xc5,
+            0xfe, 0x7c, 0x6f, 0x2b
         ]);
+    }
+
+    #[test]
+    fn test_mix_columns() {
+        let state = [
+            0x63, 0x6b, 0x67, 0x76,
+            0xf2, 0x01, 0xab, 0x7b,
+            0x30, 0xd7, 0x77, 0xc5,
+            0xfe, 0x7c, 0x6f, 0x2b
+        ];
+        let mixed_state = mix_columns(state);
+        print_state(mixed_state);
+        assert_eq!(
+            mixed_state,
+            [
+                0x6a, 0x6a, 0x5c, 0x45,
+                0x2c, 0x6d, 0x33, 0x51,
+                0xb0, 0xd9, 0x5d, 0x61,
+                0x27, 0x9c, 0x21, 0x5c
+            ]
+        );
     }
 }
