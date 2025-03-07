@@ -72,9 +72,9 @@ pub fn key_expansion(rk0: [u8; 16]) -> [[u8; 16]; 11] {
     return round_keys;
 }
 
-pub fn transform(ciphertext: &str) -> [u8; 16] {
+pub fn transform(plaintext: &str) -> [u8; 16] {
     let mut state: [u8; 16] = [0; 16];
-    for (i, c) in ciphertext[..state.len()].as_bytes().iter().enumerate() {
+    for (i, c) in plaintext[..state.len()].as_bytes().iter().enumerate() {
         state[i] = *c;
     }
     return state;
@@ -83,7 +83,7 @@ pub fn transform(ciphertext: &str) -> [u8; 16] {
 pub fn print_state(state: [u8; 16]) {
     for i in 0..4 {
         for j in 0..4 {
-            print!("{:x} ", state[j * 4 + i]);
+            print!("{:#04x} ", state[j * 4 + i]);
         }
         println!();
     }
@@ -134,20 +134,40 @@ pub fn mix_columns(state: [u8; 16]) -> [u8; 16] {
         let a2 = state[4 * i + 2];
         let a3 = state[4 * i + 3];
 
-        // print_state(mixed_state);
-        // println!("\n");
-
-        // mixed_state[4 * i] = a0;
-        // mixed_state[4 * i + 1] = a1;
-        // mixed_state[4 * i + 2] = a2;
-        // mixed_state[4 * i + 3] = a3;
-
         mixed_state[4 * i] = mul2(a0) ^ mul3(a1) ^ a2 ^ a3;
         mixed_state[4 * i + 1] = a0 ^ mul2(a1) ^ mul3(a2) ^ a3;
         mixed_state[4 * i + 2] = a0 ^ a1 ^ mul2(a2) ^ mul3(a3);
         mixed_state[4 * i + 3] = mul3(a0) ^ a1 ^ a2 ^ mul2(a3);
     }
     return mixed_state;
+}
+
+pub fn add_round_key(state: [u8; 16], key: [u8; 16]) -> [u8; 16] {
+    let mut added_state: [u8; 16] = [0; 16];
+    for i in 0..16 {
+        added_state[i] = state[i] ^ key[i];
+    }
+    return added_state;
+}
+
+// AES-128 encryption
+pub fn encrypt(plaintext: &str, key: [u8; 16]) -> [u8; 16] {
+    let mut state = transform(plaintext);
+    let round_keys = key_expansion(key);
+    // Round 1
+    state = add_round_key(state, round_keys[0]);    
+    // Round 2 to 10
+    for round in 1..10 {
+        state = sub_bytes(state);
+        state = shift_rows(state);
+        state = mix_columns(state);
+        state = add_round_key(state, round_keys[round]);
+    }
+    // Round 11
+    state = sub_bytes(state);
+    state = shift_rows(state);
+    state = add_round_key(state, round_keys[10]);
+    return state;
 }
 
 #[rustfmt::skip]
@@ -256,14 +276,50 @@ mod tests {
         ];
         let mixed_state = mix_columns(state);
         print_state(mixed_state);
-        assert_eq!(
-            mixed_state,
-            [
-                0x6a, 0x6a, 0x5c, 0x45,
-                0x2c, 0x6d, 0x33, 0x51,
-                0xb0, 0xd9, 0x5d, 0x61,
-                0x27, 0x9c, 0x21, 0x5c
-            ]
-        );
+        assert_eq!(mixed_state, [
+            0x6a, 0x6a, 0x5c, 0x45,
+            0x2c, 0x6d, 0x33, 0x51,
+            0xb0, 0xd9, 0x5d, 0x61,
+            0x27, 0x9c, 0x21, 0x5c
+        ]);
+    }
+
+    #[test]
+    fn test_add_round_key() {
+        let state = [
+            0x6a, 0x6a, 0x5c, 0x45,
+            0x2c, 0x6d, 0x33, 0x51,
+            0xb0, 0xd9, 0x5d, 0x61,
+            0x27, 0x9c, 0x21, 0x5c
+        ];
+        let key = [
+            0xd6, 0xaa, 0x74, 0xfd,
+            0xd2, 0xaf, 0x72, 0xfa,
+            0xda, 0xa6, 0x78, 0xf1,
+            0xd6, 0xab, 0x76, 0xfe
+        ];
+        let added_state = add_round_key(state, key);
+        print_state(added_state);
+        assert_eq!(added_state, [
+            0xbc, 0xc0, 0x28, 0xb8,
+            0xfe, 0xc2, 0x41, 0xab,
+            0x6a, 0x7f, 0x25, 0x90,
+            0xf1, 0x37, 0x57, 0xa2
+        ]);
+    }
+
+    #[test]
+    fn test_encrypt() {
+        let plaintext = "theblockbreakers";
+        let key: [u8; 16] = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
+        let ciphertext = encrypt(plaintext, key);
+
+        print_state(ciphertext);
+        assert_eq!(ciphertext, [
+            0xc6, 0x9f, 0x25, 0xd0,
+            0x02, 0x5a, 0x9e, 0xf3,
+            0x23, 0x93, 0xf6, 0x3e,
+            0x2f, 0x05, 0xb7, 0x47
+        ]);
     }
 }
