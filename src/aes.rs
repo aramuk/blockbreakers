@@ -87,9 +87,9 @@ pub fn transform(plaintext: &str) -> [u8; 16] {
 }
 
 pub fn inv_transform(state: [u8; 16]) -> String {
-    let mut plaintext: String = String::new();
-    for i in 0..16 {
-        plaintext.push(state[i] as char);
+    let mut plaintext = String::new();
+    for c in state.iter() {
+        plaintext.push(char::from(*c));
     }
     return plaintext;
 }
@@ -224,19 +224,26 @@ pub fn inv_shift_rows(state: [u8; 16]) -> [u8; 16] {
 }
 
 fn mul9(a: u8) -> u8 {
-    return mul3(mul3(a));
+    return dbl(dbl(dbl(a))) ^ a;
 }
 
 fn mul11(a: u8) -> u8 {
-    return mul9(a) ^ mul2(a);
+    let a2 = dbl(a);
+    let a8 = dbl(dbl(a2));
+    return a8 ^ a2 ^ a;
 }
 
 fn mul13(a: u8) -> u8 {
-    return mul3(mul3(mul2(a))) ^ a;
+    let a4 = dbl(dbl(a));
+    let a8 = dbl(a4);
+    return a8 ^ a4 ^ a;
 }
 
 fn mul14(a: u8) -> u8 {
-    return mul2(mul2(mul3(a) ^ a));
+    let a2 = dbl(a);
+    let a4 = dbl(a2);
+    let a8 = dbl(a4);
+    return a8 ^ a4 ^ a2;
 }
 
 pub fn inv_mix_columns(state: [u8; 16]) -> [u8; 16] {
@@ -261,8 +268,8 @@ pub fn inv_add_round_key(state: [u8; 16], key: [u8; 16]) -> [u8; 16] {
 }
 
 
-pub fn decrypt(ciphertext: &str, key: [u8; 16]) -> String {
-    let mut state = transform(ciphertext);
+pub fn decrypt(ciphertext: [u8; 16], key: [u8; 16]) -> String {
+    let mut state = ciphertext;
     let round_keys = key_expansion(key);
     // Round 10
     state = inv_add_round_key(state, round_keys[10]);
@@ -277,9 +284,7 @@ pub fn decrypt(ciphertext: &str, key: [u8; 16]) -> String {
     }
     // Round 0
     state = inv_add_round_key(state, round_keys[0]);
-    print_state(state);
-    let plaintext = inv_transform(state);
-    return plaintext;
+    return inv_transform(state);
 }
 
 #[rustfmt::skip]
@@ -348,14 +353,21 @@ mod tests {
 
     #[test]
     fn test_sub_bytes() {
-        let state = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f];
+        let state = [
+            0x00, 0x01, 0x02, 0x03,
+            0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b,
+            0x0c, 0x0d, 0x0e, 0x0f
+        ];
         let subbed_state = sub_bytes(state);
         print_state(subbed_state);
         assert_eq!(
             subbed_state,
             [
-                0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7,
-                0xab, 0x76
+                0x63, 0x7c, 0x77, 0x7b,
+                0xf2, 0x6b, 0x6f, 0xc5,
+                0x30, 0x01, 0x67, 0x2b,
+                0xfe, 0xd7, 0xab, 0x76
             ]
         );
     }
@@ -437,17 +449,107 @@ mod tests {
 
     #[test]
     fn test_decrypt() {
-        let ciphertext = "c69f25d0025a9ef32393f63e2f05b747";
+        let ciphertext = [0xc6, 0x9f, 0x25, 0xd0, 0x02, 0x5a, 0x9e, 0xf3, 0x23, 0x93, 0xf6, 0x3e, 0x2f, 0x05, 0xb7, 0x47];
         let key: [u8; 16] = [0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c];
-        let plaintext: String = decrypt(ciphertext, key);
-        assert_eq!(plaintext, "theblockbreakers");
+
+        let plaintext = decrypt(ciphertext, key);
+
+        assert_eq!(plaintext.as_str(), "theblockbreakers");
     }
 
-    // #[test]
-    // fn test_inv_sbox_en() {
-    //     for i in 0..256 {
-    //         assert_eq!(i as u8, INV_SBOX_EN[SBOX_EN[i] as usize]);
-    //     }
-    // }
+    #[test]
+    fn test_inv_sbox_en() {
+        for i in 0..256 {
+            assert_eq!(i as u8, INV_SBOX_EN[SBOX_EN[i] as usize]);
+        }
+    }
+
+    #[test]
+    fn test_inv_sub_bytes() {
+        let state =             [
+            0x63, 0x7c, 0x77, 0x7b,
+            0xf2, 0x6b, 0x6f, 0xc5,
+            0x30, 0x01, 0x67, 0x2b,
+            0xfe, 0xd7, 0xab, 0x76
+        ];
+        let inv_subbed_state = inv_sub_bytes(state);
+        print_state(inv_subbed_state);
+        assert_eq!(inv_subbed_state, [
+            0x00, 0x01, 0x02, 0x03,
+            0x04, 0x05, 0x06, 0x07,
+            0x08, 0x09, 0x0a, 0x0b,
+            0x0c, 0x0d, 0x0e, 0x0f
+        ]);
+    }
+
+    #[test]
+    fn test_inv_shift_rows() {
+        let state =[
+            0x63, 0x6b, 0x67, 0x76,
+            0xf2, 0x01, 0xab, 0x7b,
+            0x30, 0xd7, 0x77, 0xc5,
+            0xfe, 0x7c, 0x6f, 0x2b
+        ];
+        let inv_shifted_state = inv_shift_rows(state);
+        print_state(inv_shifted_state);
+        assert_eq!(inv_shifted_state,  [
+            0x63, 0x7c, 0x77, 0x7b,
+            0xf2, 0x6b, 0x6f, 0xc5,
+            0x30, 0x01, 0x67, 0x2b,
+            0xfe, 0xd7, 0xab, 0x76,
+        ]);
+    }
+
+    #[test]
+    fn test_inv_mix_columns() {
+        let state = [
+            0x6a, 0x6a, 0x5c, 0x45,
+            0x2c, 0x6d, 0x33, 0x51,
+            0xb0, 0xd9, 0x5d, 0x61,
+            0x27, 0x9c, 0x21, 0x5c
+        ];
+        let inv_mixed_state = inv_mix_columns(state);
+        print_state(inv_mixed_state);
+        assert_eq!(inv_mixed_state, [
+            0x63, 0x6b, 0x67, 0x76,
+            0xf2, 0x01, 0xab, 0x7b,
+            0x30, 0xd7, 0x77, 0xc5,
+            0xfe, 0x7c, 0x6f, 0x2b
+        ]);
+    }
+
+    #[test]
+    fn test_inv_add_round_key() {
+        let state = [
+            0xbc, 0xc0, 0x28, 0xb8,
+            0xfe, 0xc2, 0x41, 0xab,
+            0x6a, 0x7f, 0x25, 0x90,
+            0xf1, 0x37, 0x57, 0xa2
+        ];
+        let key = [
+            0xd6, 0xaa, 0x74, 0xfd,
+            0xd2, 0xaf, 0x72, 0xfa,
+            0xda, 0xa6, 0x78, 0xf1,
+            0xd6, 0xab, 0x76, 0xfe
+        ];
+        let inv_added_state = inv_add_round_key(state, key);
+        print_state(inv_added_state);
+        assert_eq!(inv_added_state, [
+            0x6a, 0x6a, 0x5c, 0x45,
+            0x2c, 0x6d, 0x33, 0x51,
+            0xb0, 0xd9, 0x5d, 0x61,
+            0x27, 0x9c, 0x21, 0x5c
+        ]);
+    }
+
+    #[test]
+    fn test_mul(){
+        assert_eq!(mul2(0x01), 0x02);
+        assert_eq!(mul3(0x01), 0x03);
+        assert_eq!(mul9(0x01), 0x09);
+        assert_eq!(mul11(0x01), 0x0b);
+        assert_eq!(mul13(0x01), 0x0d);
+        assert_eq!(mul14(0x01), 0x0e);
+    }
 }
 
